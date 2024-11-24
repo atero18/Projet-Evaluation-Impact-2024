@@ -14,16 +14,16 @@ Hypothèse d'homoscédasticité ($\sigma_1=\sigma_2=\sigma$) et de covariance di
 regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
 {
   N <- length(Yobs)
-  p <- ncol(X)
   
-  pPrime <- ncol(XPrime)
+  p <- ncol(X)
+  # pPrime <- ncol(XPrime)
   
   # On renomme les variables qui sont utilisées uniquement
   # pour le calcul de l'effet
   colnames(XPrime) <- paste(colnames(XPrime), "_delta", sep = "")
   
   # Regroupement de toutes les covariables
-  data <- dataEval <- cbind(X, XPrime)
+  dataEstim <- dataEval <- cbind(X, XPrime)
   
   # Passage à zéro des données supplémentaires pour
   # l'échantillon de contrôle pour l'évaluation
@@ -43,7 +43,7 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   Ycontrol <- ifelse(group == "Control", Yobs, NA_real_)
   Ytreated <- ifelse(group == "Treated", Yobs, NA_real_)
   
-  data <- data %>% 
+  dataEstim <- dataEstim %>% 
     mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
     mutate(intercept = 1.0, .before = 1L) %>% 
     as.matrix()
@@ -53,8 +53,8 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   # On nullifie / ne considère pas les coefficients associés 
   # à l'impact causal (ceux associés à XPrime) pour le groupe contrôle
   
-  YcontrolEstim <- data[, seq_len(p + 1L)] %*% coefs[seq_len(p + 1L)]
-  YtreatedEstim <- data %*% coefs
+  YcontrolEstim <- dataEstim[, seq_len(p + 1L)] %*% coefs[seq_len(p + 1L)]
+  YtreatedEstim <- dataEstim %*% coefs
   
   list(model = model,
        Ycontrol = Ycontrol, 
