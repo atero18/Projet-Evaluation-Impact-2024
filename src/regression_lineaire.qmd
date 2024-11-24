@@ -1,0 +1,82 @@
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+source("src/loading_data.R")
+```
+
+Xprime représente les covariables utilisées pour l'effet causal pour toute la population, si les unités se trouvaient dans le groupe traitement.
+
+Hypothèse d'homoscédasticité ($\sigma_1=\sigma_2=\sigma$) et de covariance diagonale entre les contrefactuels traités et contrôles.
+```{r}
+regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
+{
+  N <- length(Yobs)
+  p <- ncol(X)
+  
+  pPrime <- ncol(XPrime)
+  
+  # On renomme les variables qui sont utilisées uniquement
+  # pour le calcul de l'effet
+  colnames(XPrime) <- paste(colnames(XPrime), "_delta", sep = "")
+  
+  # Regroupement de toutes les covariables
+  data <- dataEval <- cbind(X, XPrime)
+  
+  # Passage à zéro des données supplémentaires pour
+  # l'échantillon de contrôle pour l'évaluation
+  quantVarsPrime <- colnames(XPrime)[vapply(XPrime, is.numeric, logical(1L))]
+  qualVarsPrime <- setdiff(colnames(XPrime), quantVarsPrime)
+  dataEval[group == "Control", quantVarsPrime] <- 0.0
+  dataEval[group == "Control", qualVarsPrime] <- "0"
+  
+  dataEval$Yobs <- Yobs
+  
+  model <- lm(Yobs ~ .,
+              data = dataEval, 
+              singular.ok = FALSE,
+              subset = subset)
+  
+  
+  Ycontrol <- ifelse(group == "Control", Yobs, NA_real_)
+  Ytreated <- ifelse(group == "Treated", Yobs, NA_real_)
+  
+  data <- data %>% 
+    mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
+    mutate(intercept = 1.0, .before = 1L) %>% 
+    as.matrix()
+  
+  coefs <- coef(model)
+  
+  # On nullifie / ne considère pas les coefficients associés 
+  # à l'impact causal (ceux associés à XPrime) pour le groupe contrôle
+  
+  YcontrolEstim <- data[, seq_len(p + 1L)] %*% coefs[seq_len(p + 1L)]
+  YtreatedEstim <- data %*% coefs
+  
+  list(model = model,
+       Ycontrol = Ycontrol, 
+       Ytreated = Ytreated, 
+       YcontrolEstim = YcontrolEstim, 
+       YtreatedEstim = YtreatedEstim)
+}
+```
+
+# Régression linéaire multiple classique
+
+```{r}
+res <- regFun(dataObs$RE78, dataObs$group, dataObs[, listCovariates])
+```
+
+```{r}
+group <- dataObs$group
+(res$Ycontrol - res$YcontrolEstim) %>% mean(na.rm = TRUE)
+(res$Ytreated - res$YtreatedEstim) %>% mean(na.rm = TRUE)
+```
+# Régression sous *trimming*
+
+# Régression sous score de propension
+
+# Matching

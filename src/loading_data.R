@@ -47,6 +47,9 @@ dataObs <- rbind(controlObs, treatedExp) %>%
   mutate(group = fct_recode(T, "Control" = "0", "Treated" = "1")) %>% 
   select(-T)
 
+listCovariates <- setdiff(colnames(dataObs), c("group", "RE78"))
+listQuantCovariates <- c("age", "education", "RE74", "RE75")
+
 rm(treatedExp, controlObs)
 
 rm(readFile)

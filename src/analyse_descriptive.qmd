@@ -10,10 +10,6 @@ source("src/loading_data.R")
 ```{r}
 summary(dataObs)
 ```
-```{r}
-listCovariates <- setdiff(colnames(dataObs), c("group", "RE78"))
-```
-
 # Étude descriptive
 
 ```{r}
@@ -23,6 +19,7 @@ dataObs %>%
   summarise(n = n(), across(everything(), mean)) %>% 
   mutate(group = factor(group, labels = c("Control", "Treated")))
 ```
+
 ```{r}
 table(dataObs$group, dataObs$Black)
 ```
@@ -50,6 +47,7 @@ dataObs %>%
 ```
 
 Contrefactuels
+
 ```{r}
 dataObs %>% 
   ggplot() +
@@ -60,8 +58,7 @@ dataObs %>%
 ## Score de propension
 
 ```{r}
-modelProp <- glm(group ~ . - RE78, data = dataObs, family = binomial)
-propValues <- predict.glm(modelProp, type = "response")
+source("src/calcul_propension.R")
 ```
 
 ```{r}
@@ -84,10 +81,8 @@ dataProp %>% filter(group == "Control") %>% select(e) %>% summary()
 dataProp %>% filter(group == "Treated") %>% select(e) %>% summary()
 ```
 
-
 ```{r}
 dataProp %>% 
   group_by(group) %>% 
   summarise(n = n(), mean_e = mean(e))
 ```
-
