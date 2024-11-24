@@ -1,0 +1,93 @@
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+source("src/loading_data.R")
+```
+
+```{r}
+summary(dataObs)
+```
+```{r}
+listCovariates <- setdiff(colnames(dataObs), c("group", "RE78"))
+```
+
+# Étude descriptive
+
+```{r}
+dataObs %>% 
+  mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
+  group_by(group) %>% 
+  summarise(n = n(), across(everything(), mean)) %>% 
+  mutate(group = factor(group, labels = c("Control", "Treated")))
+```
+```{r}
+table(dataObs$group, dataObs$Black)
+```
+
+```{r}
+table(dataObs$group, dataObs$married)
+```
+
+```{r}
+table(dataObs$group, dataObs$nodegree)
+```
+
+```{r}
+dataObs %>% 
+  ggplot() +
+  geom_density(aes(x = RE74, colour = group)) +
+  ggtitle("Distribution de RE74, en fonction du groupe")
+```
+
+```{r}
+dataObs %>% 
+  ggplot() +
+  geom_density(aes(x = RE75, colour = group)) +
+  ggtitle("Distribution de RE74, en fonction du groupe")
+```
+
+Contrefactuels
+```{r}
+dataObs %>% 
+  ggplot() +
+  geom_density(aes(x = RE78, colour = group)) +
+  ggtitle("Distribution de RE74, en fonction du groupe")
+```
+
+## Score de propension
+
+```{r}
+modelProp <- glm(group ~ . - RE78, data = dataObs, family = binomial)
+propValues <- predict.glm(modelProp, type = "response")
+```
+
+```{r}
+dataProp <- dataObs %>% 
+  select(group) %>% 
+  mutate(e = propValues)
+
+ggplot(dataProp) + 
+  geom_histogram(aes(x = e, colour = group))
+```
+
+```{r}
+dataProp %>% 
+  filter(group == "Treated") %>% 
+  ggplot() + geom_histogram(aes(x = e))
+```
+
+```{r}
+dataProp %>% filter(group == "Control") %>% select(e) %>% summary()
+dataProp %>% filter(group == "Treated") %>% select(e) %>% summary()
+```
+
+
+```{r}
+dataProp %>% 
+  group_by(group) %>% 
+  summarise(n = n(), mean_e = mean(e))
+```
+

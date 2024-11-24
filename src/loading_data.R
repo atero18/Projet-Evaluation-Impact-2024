@@ -1,5 +1,6 @@
 library(readr)
 library(dplyr)
+library(forcats)
 
 readFile <- function(file)
 {
@@ -24,24 +25,30 @@ readFile <- function(file)
   # indRE75 (1 if earnings in 1975, 0 otherwise)
   data %>% 
     mutate(indRE74 = (RE74 > 0.0) %>% as.integer() %>% factor(),
-           indRE75 = (RE75 > 0.0) %>% as.integer() %>% factor())
+           .after = RE74) %>% 
+    mutate(indRE75 = (RE75 > 0.0) %>% as.integer() %>% factor(), 
+           .after = RE75)
   
 }
 
-controlExp <- readFile("nswre74_Dehejia_Wahha_exp_control.csv")
+# controlExp <- readFile("data/nswre74_Dehejia_Wahha_exp_control.csv")
 
-treatedExp <- readFile("nswre74_Dehejia_Wahha_exp_treated.csv")
+treatedExp <- readFile("data/nswre74_Dehejia_Wahha_exp_treated.csv")
 
-dataExp <- rbind(controlExp, treatedExp)
+# dataExp <- rbind(controlExp, treatedExp)
 
-rm(controlExp)
+# rm(controlExp)
 
-summary(dataExp)
+# summary(dataExp)
 
-controlObs <- readFile("cps_nonexp_control.csv")
+controlObs <- readFile("data/cps_nonexp_control.csv")
 
-dataObs <- rbind(controlObs, treatedExp)
+dataObs <- rbind(controlObs, treatedExp) %>% 
+  mutate(group = fct_recode(T, "Control" = "0", "Treated" = "1")) %>% 
+  select(-T)
 
 rm(treatedExp, controlObs)
 
-summary(dataObs)
+rm(readFile)
+
+# summary(dataObs)
