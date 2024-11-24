@@ -67,16 +67,87 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
 # Régression linéaire multiple classique
 
 ```{r}
-res <- regFun(dataObs$RE78, dataObs$group, dataObs[, listCovariates])
+modelLin <- regFun(dataObs$RE78, dataObs$group, dataObs[, listCovariates])
 ```
 
 ```{r}
 group <- dataObs$group
-(res$Ycontrol - res$YcontrolEstim) %>% mean(na.rm = TRUE)
-(res$Ytreated - res$YtreatedEstim) %>% mean(na.rm = TRUE)
+(modelLin$Ycontrol - modelLin$YcontrolEstim) %>% mean(na.rm = TRUE)
+(modelLin$Ytreated - modelLin$YtreatedEstim) %>% mean(na.rm = TRUE)
 ```
-# Régression sous *trimming*
+# Régression sous support commun
 
-# Régression sous score de propension
+```{r}
+source("src/calcul_propension.R")
+```
+
+Rubin & Imbens (2015), p. 366
+
+```{r}
+varianceProp <- propValues * (1.0 - propValues)
+invVar <- 1.0 / varianceProp
+maxInvVar <- max(invVar)
+meanInvVar <- mean(invVar)
+
+maxInvVar <= 2.0 * meanInvVar
+```
+
+```{r}
+ordInvVar <- sort(invVar)
+for (k in seq_along(ordInvVar))
+{
+  if (k * ordInvVar[k] >= 2.0 * sum(ordInvVar[seq_len(k)]))
+  {
+    gamma <- ordInvVar[k]
+    break
+  }
+}
+```
+
+```{r}
+k * unname(ordInvVar[k])
+2.0 * sum(ordInvVar[seq_len(k)])
+```
+
+
+```{r}
+alpha <- 0.5 - sqrt(0.25 - 1.0 / gamma)
+```
+
+```{r}
+maskTrimming <- alpha <= propValues & propValues <= 1.0 - alpha
+```
+
+```{r}
+sum(maskTrimming)
+sum(maskTrimming[group == "Treated"])
+```
+
+Tous les traités ne sont pas conservés.
+
+Problème de rang (en particulier très peu de `Hispanic`) : on laisse tous les traités.
+```{r}
+maskTrimming[group == "Treated"] <- TRUE
+```
+
+```{r}
+dataProp <- dataObs %>% 
+  select(group) %>% 
+  mutate(e = propValues, trimming = maskTrimming)
+
+dataProp %>% 
+  filter(maskTrimming) %>% 
+  ggplot() + 
+  geom_histogram(aes(x = e, colour = group))
+```
+
+
+
+
+```{r}
+modelTrim <- regFun(dataObs$RE78, dataObs$group, 
+                    dataObs[, listCovariates], subset = maskTrimming)
+```
+
 
 # Matching
