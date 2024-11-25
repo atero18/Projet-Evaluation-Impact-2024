@@ -10,6 +10,21 @@ source("src/loading_data.R")
 Xprime représente les covariables utilisées pour l'effet causal pour toute la population, si les unités se trouvaient dans le groupe traitement.
 
 Hypothèse d'homoscédasticité ($\sigma_1=\sigma_2=\sigma$) et de covariance diagonale entre les contrefactuels traités et contrôles.
+
+```{r}
+set_zero <- function(data, subsetUnits = !logical(nrow(data)), subsetVars = colnames(data))
+{
+  quantVars <- colnames(data)[vapply(data, is.numeric, logical(1L))]
+  quantVars <- intersect(quantVars, subsetVars)
+  qualVars <- setdiff(colnames(data), quantVars)
+  qualVars <- intersect(qualVars, subsetVars)
+  data[subsetUnits, quantVars] <- 0.0
+  data[subsetUnits, qualVars] <- "0"
+  
+  data
+}
+```
+
 ```{r}
 regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
 {
@@ -17,6 +32,16 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   
   p <- ncol(X)
   # pPrime <- ncol(XPrime)
+  
+  quantVars <- colnames(X)[vapply(X, is.numeric, logical(1L))]
+  
+  order2Terms <- 
+  combn(quantVars, 2L, 
+        function(x) paste(x, collapse = ":"), simplify = TRUE)
+
+  order2Terms <- c(order2Terms, 
+                   paste(quantVars, "^2", sep = ""))
+  
   
   # On renomme les variables qui sont utilisées uniquement
   # pour le calcul de l'effet
@@ -28,13 +53,42 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   # Passage à zéro des données supplémentaires pour
   # l'échantillon de contrôle pour l'évaluation
   quantVarsPrime <- colnames(XPrime)[vapply(XPrime, is.numeric, logical(1L))]
-  qualVarsPrime <- setdiff(colnames(XPrime), quantVarsPrime)
-  dataEval[group == "Control", quantVarsPrime] <- 0.0
-  dataEval[group == "Control", qualVarsPrime] <- "0"
+  
+  order2TermsPrime <- 
+    combn(quantVarsPrime, 2L, 
+          function(x) paste(x, collapse = ":"), simplify = TRUE)
+  
+  order2TermsPrime <- c(order2TermsPrime, 
+                        paste(quantVarsPrime, "^2", sep = ""))
+  
+  
+  #qualVarsPrime <- setdiff(colnames(XPrime), quantVarsPrime)
+  
+  dataEval <- set_zero(dataEval,
+                       subsetUnits = (group == "Control"), 
+                       subsetVars = colnames(XPrime))
+  
+
+  M <- model.matrix(as.formula(paste(" ~ . + ", 
+                       paste(c(order2Terms, order2TermsPrime),
+                             collapse = " + "))), data = dataEval)
+  
+  QR <- qr(crossprod(M))
+  vars <- QR$pivot[seq_len(QR$rank)]
+  keptVars <- rownames(QR$qr)[vars]
+  
+  order2Terms <- intersect(c(order2Terms, order2TermsPrime), keptVars)
+  
+  
+  formulaProp <- paste("Yobs ~ . + ", 
+                       paste(c(order2Terms, order2TermsPrime),
+                             collapse = " + ")) %>% 
+    as.formula()
   
   dataEval$Yobs <- Yobs
   
-  model <- lm(Yobs ~ .,
+  
+  model <- lm(formulaProp,
               data = dataEval, 
               singular.ok = FALSE,
               subset = subset)
@@ -43,32 +97,50 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   Ycontrol <- ifelse(group == "Control", Yobs, NA_real_)
   Ytreated <- ifelse(group == "Treated", Yobs, NA_real_)
   
-  dataEstim <- dataEstim %>% 
-    mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
-    mutate(intercept = 1.0, .before = 1L) %>% 
-    as.matrix()
+  dataEstim <- set_zero(dataEstim, 
+                        subsetUnits = (group == "Treated"),
+                        subsetVars = colnames(XPrime))
   
-  coefs <- coef(model)
+  YmisEstim <- predict(model, data = dataEstim)
+  
+  # dataEstim <- dataEstim %>% 
+  #   mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
+  #   mutate(intercept = 1.0, .before = 1L) %>% 
+  #   as.matrix()
+  
+  # coefs <- coef(model)
   
   # On nullifie / ne considère pas les coefficients associés 
   # à l'impact causal (ceux associés à XPrime) pour le groupe contrôle
   
-  YcontrolEstim <- dataEstim[, seq_len(p + 1L)] %*% coefs[seq_len(p + 1L)]
-  YtreatedEstim <- dataEstim %*% coefs
+  # YcontrolEstim <- dataEstim[, seq_len(p + 1L)] %*% coefs[seq_len(p + 1L)]
+  # YtreatedEstim <- dataEstim %*% coefs
   
   list(model = model,
+       dataEval = dataEval,
        Ycontrol = Ycontrol, 
        Ytreated = Ytreated, 
-       YcontrolEstim = YcontrolEstim, 
-       YtreatedEstim = YtreatedEstim)
+       YcontrolEstim = YmisEstim[group == "Control"], 
+       YtreatedEstim = YmisEstim[group == "Treated"])
 }
 ```
 
 # Régression linéaire multiple classique
 
 ```{r}
-modelLin <- regFun(dataObs$RE78, dataObs$group, dataObs[, listCovariates])
+resLin <- regFun(dataObs$RE78, dataObs$group, dataObs[, listCovariates])
+modelLin <- resLin$model
 ```
+
+```{r}
+summary(modelLin)
+```
+
+```{r}
+modelLinAIC <- step(modelLin)
+```
+
+
 
 ```{r}
 group <- dataObs$group
@@ -145,9 +217,23 @@ dataProp %>%
 
 
 ```{r}
-modelTrim <- regFun(dataObs$RE78, dataObs$group, 
+resTrim <- regFun(dataObs$RE78, dataObs$group, 
                     dataObs[, listCovariates], subset = maskTrimming)
+modelTrim <- resTrim$model
 ```
 
+```{r}
+summary(modelTrim)
+```
+
+```{r}
+dataEval <- resTrim$dataEval
+modelTrimAIC <- step(modelTrim)
+rm(dataEval)
+```
+
+```{r}
+summary(modelTrimAIC)
+```
 
 # Matching
