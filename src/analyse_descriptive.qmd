@@ -1,6 +1,7 @@
 ```{r}
 library(dplyr)
 library(ggplot2)
+library(scales)
 ```
 
 ```{r}
@@ -16,11 +17,36 @@ summary(dataObs)
 ## Variables explicatives
 
 ```{r}
-dataObs %>% 
+summVarsExp <- dataObs %>% 
   mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
   group_by(group) %>% 
+  select(-RE78) %>% 
   summarise(n = n(), across(everything(), mean)) %>% 
-  mutate(group = factor(group, labels = c("Control", "Treated")))
+  select(-group) %>% 
+  t()
+
+colnames(summVarsExp) <- c("Control", "Treated")
+
+summVarsExp <- round(summVarsExp, 4L)
+summVarsExp
+```
+```{r}
+dataObs %>% 
+  ggplot() +
+  geom_histogram(aes(x = education, 
+                     y = after_stat(ncount / sum(ncount)), colour = group)) +
+  ggtitle("Distribution de la variable education en fonction du groupe") +
+   scale_y_continuous(labels = scales::percent_format()) +
+  ylab("Proportion")
+```
+```{r}
+dataObs %>%
+  dplyr::count(education, group)  %>%
+  group_by(group) %>%
+  mutate(Proportion = n / sum(n)) %>%
+  ggplot() + 
+  geom_col(aes(education, Proportion, fill = group), position = 'dodge') +
+  ggtitle("Distribution de la variable education en fonction du groupe")
 ```
 
 ```{r}
@@ -43,11 +69,20 @@ dataObs %>%
 ```
 
 ```{r}
+table(dataObs$group, dataObs$indRE74)
+```
+
+```{r}
 dataObs %>% 
   ggplot() +
   geom_density(aes(x = RE75, colour = group)) +
   ggtitle("Distribution de RE74, en fonction du groupe")
 ```
+
+```{r}
+table(dataObs$group, dataObs$indRE75)
+```
+
 
 ## Contrefactuels
 
