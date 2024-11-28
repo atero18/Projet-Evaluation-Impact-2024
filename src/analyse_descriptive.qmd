@@ -12,6 +12,9 @@ summary(dataObs)
 ```
 # Étude descriptive
 
+
+## Variables explicatives
+
 ```{r}
 dataObs %>% 
   mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
@@ -46,14 +49,44 @@ dataObs %>%
   ggtitle("Distribution de RE74, en fonction du groupe")
 ```
 
-Contrefactuels
+## Contrefactuels
+
+```{r}
+summary(dataObs$RE78)
+```
+
+```{r}
+dataObs %>% filter(group == "Control") %>% select(RE78) %>% summary()
+```
+```{r}
+dataObs %>% filter(group == "Treated") %>% select(RE78) %>% summary()
+```
+Proportion de 0 par groupe
+```{r}
+dataObs %>% 
+  group_by(group) %>% 
+  summarise(propZero = sum(RE78 == 0.0) / n())
+```
+
+```{r}
+dataObs %>% 
+  ggplot() +
+  geom_density(aes(x = RE78)) +
+  ggtitle("Distribution de RE78 sur l'ensemble de l'échantillon")
+```
 
 ```{r}
 dataObs %>% 
   ggplot() +
   geom_density(aes(x = RE78, colour = group)) +
-  ggtitle("Distribution de RE74, en fonction du groupe")
+  ggtitle("Distribution de RE78, en fonction du groupe")
 ```
+
+```{r}
+ks.test(pull(dataObs[dataObs$group == "Control", "RE78"]), 
+        pull(dataObs[dataObs$group == "Treated", "RE78"]))
+```
+
 
 ## Score de propension
 

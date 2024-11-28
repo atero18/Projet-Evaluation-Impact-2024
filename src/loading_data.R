@@ -24,10 +24,13 @@ readFile <- function(file)
   # indRE74 (1 if earnings in 1974, 0 otherwise)
   # indRE75 (1 if earnings in 1975, 0 otherwise)
   data %>% 
+    mutate(RE74 = RE74 / 1000.0) %>% 
     mutate(indRE74 = (RE74 > 0.0) %>% as.integer() %>% factor(),
            .after = RE74) %>% 
+    mutate(RE75 = RE75 / 1000.0) %>% 
     mutate(indRE75 = (RE75 > 0.0) %>% as.integer() %>% factor(), 
-           .after = RE75)
+           .after = RE75) %>% 
+    mutate(RE78 = RE78 / 1000.0)
   
 }
 
