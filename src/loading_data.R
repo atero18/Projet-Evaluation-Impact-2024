@@ -14,8 +14,10 @@ readFile <- function(file)
 
   colTypes <- cols("T" = "f", 
                    age = "i", education = "i", 
-                   Black = "f", Hispanic = "f", 
-                   married = "f", nodegree = "f", 
+                   Black = col_factor(levels = c("0", "1")), 
+                   Hispanic = col_factor(levels = c("0", "1")), 
+                   married = col_factor(levels = c("0", "1")),
+                   nodegree = col_factor(levels = c("0", "1")), 
                    RE74 = "d", RE75 = "d", RE78 = "d")
   
   data <- readr::read_csv(file, col_names = TRUE, col_types = colTypes)

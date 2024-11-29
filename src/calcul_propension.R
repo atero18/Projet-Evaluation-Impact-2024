@@ -9,10 +9,27 @@ formulaProp <- paste("group ~ . + ", paste(order2Terms, collapse = " + ")) %>%
   as.formula()
 
 
-modelProp <- dataObs %>% 
-  select(-RE78) %>% 
-  glm(formulaProp, data = ., family = binomial)
+dataTrain <- dataObs %>% 
+  select(-RE78)
+
+# dataTrain[, listQuantCovariates] <-
+#   dataTrain[, listQuantCovariates] %>%
+#   scale(center = TRUE, scale = TRUE)
+
+modelProp <- 
+  glm(formulaProp, data = dataTrain, family = binomial)
+
+# summary(modelProp)
 
 rm(order2Terms, formulaProp)
+
+modelPropAIC <- step(modelProp, trace = 0L)
+
+# summary(modelPropAIC)
+
+# require(pROC)
+# auc(response = dataObs$group, predictor = propValues)
+
+rm(dataTrain)
 
 propValues <- predict.glm(modelProp, type = "response")

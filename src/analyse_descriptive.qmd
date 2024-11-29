@@ -29,6 +29,8 @@ colnames(summVarsExp) <- c("Control", "Treated")
 
 summVarsExp <- round(summVarsExp, 4L)
 summVarsExp
+
+conversion_latex(summVarsExp, nom = "data_vars_exp")
 ```
 ```{r}
 dataObs %>% 
@@ -134,9 +136,24 @@ dataProp <- dataObs %>%
   select(group) %>% 
   mutate(e = propValues)
 
-ggplot(dataProp) + 
-  geom_histogram(aes(x = e, colour = group))
+dataProp %>% filter(group == "Treated") %>% 
+  ggplot() + 
+  geom_density(aes(x = e)) +
+  ggtitle("Score de propension (estimé) chez les traités")
 ```
+
+```{r}
+dataProp %>% filter(group == "Control") %>% 
+  ggplot() + 
+  geom_histogram(aes(x = e)) +
+  ggtitle("Score de propension (estimé) pour le groupe contrôle")
+```
+
+```{r}
+ggplot(dataProp) + 
+  geom_histogram(aes(x = e, colour = group)) 
+```
+
 
 ```{r}
 dataProp %>% 
