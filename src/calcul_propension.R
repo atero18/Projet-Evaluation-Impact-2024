@@ -23,7 +23,7 @@ modelProp <-
 
 rm(order2Terms, formulaProp)
 
-modelPropAIC <- step(modelProp, trace = 0L)
+# modelPropAIC <- step(modelProp, trace = 0L)
 
 # summary(modelPropAIC)
 

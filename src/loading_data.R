@@ -55,6 +55,8 @@ dataObs <- rbind(controlObs, treatedExp) %>%
 listCovariates <- setdiff(colnames(dataObs), c("group", "RE78"))
 listQuantCovariates <- c("age", "education", "RE74", "RE75")
 
+N <- nrow(dataObs)
+
 rm(treatedExp, controlObs)
 
 rm(readFile)

@@ -1,6 +1,7 @@
 ```{r}
 library(dplyr)
 library(ggplot2)
+library(stringr)
 ```
 
 ```{r}
@@ -26,6 +27,19 @@ set_zero <- function(data, subsetUnits = !logical(nrow(data)), subsetVars = coln
 ```
 
 ```{r}
+factor_to_numeric <- 
+  function(factor) as.numeric(levels(factor))[factor]
+```
+
+```{r}
+mean_factor <- function(factor)
+{
+  sum(factor == "1") / N
+}
+```
+
+
+```{r}
 regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
 {
   N <- length(Yobs)
@@ -48,7 +62,7 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   colnames(XPrime) <- paste(colnames(XPrime), "_delta", sep = "")
   
   # Regroupement de toutes les covariables
-  dataEstim <- dataEval <- cbind(X, XPrime)
+  dataEstimTreated <- dataEval <- cbind(X, XPrime)
   
   # Passage à zéro des données supplémentaires pour
   # l'échantillon de contrôle pour l'évaluation
@@ -68,7 +82,6 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
                        subsetUnits = (group == "Control"), 
                        subsetVars = colnames(XPrime))
   
-
   M <- model.matrix(as.formula(paste(" ~ . + ", 
                        paste(c(order2Terms, order2TermsPrime),
                              collapse = " + "))), data = dataEval)
@@ -85,6 +98,11 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
                              collapse = " + ")) %>% 
     as.formula()
   
+  M <- model.matrix(formulaProp, data = dataEval)
+  invDesignMat <- solve(t(M) %*% M)
+  # termsWithDelta <- str_detect(colnames(M), "_delta")
+  # invDesignMatDelta <- invDesignMatDelta[termsWithDelta, termsWithDelta]
+  
   dataEval$Yobs <- Yobs
   
   
@@ -93,16 +111,21 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
               singular.ok = FALSE,
               subset = subset)
   
+  estimVarYobs <- sum((model$residuals)^2L) / (N - ncol(M))
   
   Ycontrol <- ifelse(group == "Control", Yobs, NA_real_)
   Ytreated <- ifelse(group == "Treated", Yobs, NA_real_)
   
-  YtreatedEstim <- predict(model, data = dataEstim)
+  YtreatedEstim <- predict.lm(model, 
+                              newdata = dataEstimTreated, 
+                              type = "response")
   
-  dataEstim <- set_zero(dataEstim, 
-                        subsetVars = colnames(XPrime))
+  dataEstimControl <- set_zero(dataEstimTreated, 
+                               subsetVars = colnames(XPrime))
   
-  YcontrolEstim <- predict(model, data = dataEstim)
+  YcontrolEstim <- predict.lm(model,
+                              newdata = dataEstimControl,
+                              type = "response")
   
   # dataEstim <- dataEstim %>% 
   #   mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
@@ -118,7 +141,9 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   # YtreatedEstim <- dataEstim %*% coefs
   
   list(model = model,
+       varCoefs = invDesignMat * estimVarYobs,
        dataEval = dataEval,
+       dataComplete = dataEstimTreated,
        Ycontrol = Ycontrol, 
        Ytreated = Ytreated, 
        YcontrolEstim = YcontrolEstim, 
@@ -152,15 +177,22 @@ modelAIC <- step(modelLin, trace = 0L)
 summary(modelAIC)
 ```
 
-```{r}
-
-```
-
-
 
 ```{r}
 rm(dataEval)
 ```
+
+```{r}
+mean(resLin$Ytreated - resLin$YcontrolEstim, na.rm = TRUE)
+mean(resLin$YtreatedEstim - resLin$Ycontrol, na.rm = TRUE)
+mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
+```
+
+```{r}
+data <- set_zero(resLin$dataComplete, subsetVars = listCovariates)
+varDeltaMoy <- 1.0 / N^2L * data %*% resLin$varDelta %*% t(data)
+```
+
 
 
 # Régression sous support commun
@@ -254,6 +286,13 @@ rm(dataEval)
 
 ```{r}
 summary(modelTrimAIC)
+```
+
+
+```{r}
+mean(resTrim$Ytreated - resTrim$YcontrolEstim, na.rm = TRUE)
+mean(resTrim$YtreatedEstim - resTrim$Ycontrol, na.rm = TRUE)
+mean(resTrim$YtreatedEstim - resTrim$YcontrolEstim)
 ```
 
 # Matching
