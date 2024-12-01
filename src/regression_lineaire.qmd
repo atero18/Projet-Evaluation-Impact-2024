@@ -1,7 +1,6 @@
 ```{r}
 library(dplyr)
 library(ggplot2)
-library(stringr)
 ```
 
 ```{r}
@@ -25,6 +24,7 @@ set_zero <- function(data, subsetUnits = !logical(nrow(data)), subsetVars = coln
   data
 }
 ```
+
 
 ```{r}
 factor_to_numeric <- 
@@ -151,6 +151,67 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
 }
 ```
 
+
+Permet d'utiliser `predict.lm` avec terms sans qu'il rende des données centrées.
+```{r}
+## Extracted from stats::predict.lm (called by predict.Glm for type='terms')
+
+ucmterms <-
+  function (object, newdata, terms = NULL, na.action = na.pass, ...) {
+    tt <- terms(object)
+    if (missing(newdata) || is.null(newdata)) {
+      mm <- X <- model.matrix(object)
+      mmDone <- TRUE
+      offset <- object$offset
+    }
+    else {
+      Terms <- delete.response(tt)
+      m <- model.frame(Terms, newdata, na.action = na.action, 
+                       xlev = object$xlevels)
+      if (!is.null(cl <- attr(Terms, "dataClasses"))) 
+        .checkMFClasses(cl, m)
+      X <- model.matrix(Terms, m, contrasts.arg = object$contrasts)
+      mmDone <- FALSE
+    }
+       
+    beta <- object$coefficients
+    nrp <- num.intercepts(object)   # in rms
+    ## If > 1 intercept, remove all but one
+    if(nrp > 1) beta <- cbind(beta[1], beta[-(1 : nrp)])
+       
+    if (!mmDone) {
+      mm <- model.matrix(object)
+      mmDone <- TRUE
+    }
+    aa <- attr(mm, "assign")
+    ll <- attr(tt, "term.labels")
+    hasintercept <- attr(tt, "intercept") > 0L
+    if (hasintercept) ll <- c("(Intercept)", ll)
+    aaa <- factor(aa, labels = ll)
+    asgn <- split(order(aa), aaa)
+    if(hasintercept) asgn$"(Intercept)" <- NULL
+
+    nterms <- length(asgn)
+    if (nterms > 0) {
+      predictor <- matrix(ncol = nterms, nrow = NROW(X))
+      dimnames(predictor) <- list(rownames(X), names(asgn))
+      for(i in seq.int(1L, nterms, length.out = nterms)) {
+        ii <- asgn[[i]]
+        predictor[, i] <- X[, ii, drop = FALSE] %*% beta[ii]
+      }
+      if (!is.null(terms)) predictor <- predictor[, terms, drop = FALSE]
+    } else predictor <- matrix(0, NROW(X), 0L)
+
+    attr(predictor, "constant") <- 0
+
+    if (missing(newdata) && ! is.null(na.act <- object$na.action))
+      predictor <- napredict(na.act, predictor)
+
+    predictor
+}
+```
+
+
 # Régression linéaire multiple classique
 
 ```{r}
@@ -189,8 +250,22 @@ mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
 ```
 
 ```{r}
-data <- set_zero(resLin$dataComplete, subsetVars = listCovariates)
-varDeltaMoy <- 1.0 / N^2L * data %*% resLin$varDelta %*% t(data)
+XMoyDelta <- 
+  set_zero(resLin$dataComplete, subsetVars = listCovariates) %>% 
+  model.matrix(modelLin, data = .) %>% 
+  apply(MARGIN = 2L, mean)
+
+XMoyDelta["(Intercept)"] <- 0.0
+```
+
+```{r}
+varDeltaMoy <- t(XMoyDelta) %*% 
+  resLin$varCoefs %*% 
+  XMoyDelta %>% as.numeric()
+```
+
+```{r}
+rm(XMoyDelta)
 ```
 
 
