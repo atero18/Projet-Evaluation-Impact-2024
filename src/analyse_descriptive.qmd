@@ -39,9 +39,9 @@ colnames(summVarsExp) <- c("Control", "Treated", "E")
 summVarsExp <- round(summVarsExp, 4L)
 summVarsExp
 
-conversion_latex(summVarsExp, 
-                 nom = "data_vars_exp", 
-                 caption = "Moyenne des variables explicatives")
+# conversion_latex(summVarsExp, 
+#                  nom = "data_vars_exp", 
+#                  caption = "Moyenne des variables explicatives")
 ```
 ```{r}
 dataObs %>% 

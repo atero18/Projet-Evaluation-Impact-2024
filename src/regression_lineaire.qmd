@@ -42,6 +42,16 @@ mean_factor <- function(factor)
 ```{r}
 regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
 {
+  if (!is.null(subset))
+  {
+    Yobs <- Yobs[subset]
+    group <- group[subset]
+    
+    XPrime <- XPrime[subset, , drop = FALSE]
+    X <- X[subset, , drop = FALSE]
+  }
+    
+  
   N <- length(Yobs)
   
   p <- ncol(X)
@@ -108,8 +118,7 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   
   model <- lm(formulaProp,
               data = dataEval, 
-              singular.ok = FALSE,
-              subset = subset)
+              singular.ok = FALSE)
   
   estimVarYobs <- sum((model$residuals)^2L) / (N - ncol(M))
   
@@ -141,6 +150,8 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   # YtreatedEstim <- dataEstim %*% coefs
   
   list(model = model,
+       group = group,
+       estimVarYobs = estimVarYobs,
        varCoefs = invDesignMat * estimVarYobs,
        dataEval = dataEval,
        dataComplete = dataEstimTreated,
@@ -246,22 +257,31 @@ rm(dataEval)
 ```{r}
 mean(resLin$Ytreated - resLin$YcontrolEstim, na.rm = TRUE)
 mean(resLin$YtreatedEstim - resLin$Ycontrol, na.rm = TRUE)
+```
+
+Estimation ATE sans conditionnement, sans biais si les $z_k$ sont identiquement distribués
+
+```{r}
 mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
 ```
 
 ```{r}
+XDelta <- set_zero(resLin$dataComplete, subsetVars = listCovariates) %>% 
+  model.matrix(modelLin, data = .)
+
+XDelta[, "(Intercept)"] <- 0.0
+
 XMoyDelta <- 
-  set_zero(resLin$dataComplete, subsetVars = listCovariates) %>% 
-  model.matrix(modelLin, data = .) %>% 
+  XDelta %>% 
   apply(MARGIN = 2L, mean)
 
-XMoyDelta["(Intercept)"] <- 0.0
-```
-
-```{r}
 varDeltaMoy <- t(XMoyDelta) %*% 
   resLin$varCoefs %*% 
-  XMoyDelta %>% as.numeric()
+  XMoyDelta + t(coef(modelLin)) %*% var(XDelta) %*% coef(modelLin) / nrow(XDelta) 
+
+varDeltaMoy <- varDeltaMoy %>% as.numeric()
+
+varDeltaMoy
 ```
 
 ```{r}
@@ -367,7 +387,35 @@ summary(modelTrimAIC)
 ```{r}
 mean(resTrim$Ytreated - resTrim$YcontrolEstim, na.rm = TRUE)
 mean(resTrim$YtreatedEstim - resTrim$Ycontrol, na.rm = TRUE)
-mean(resTrim$YtreatedEstim - resTrim$YcontrolEstim)
+```
+
+Estimation ATE sans biais si $z_k$ identiquement distribués conditionnellement à la présence dans l'intervalle
+```{r}
+mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
+```
+
+```{r}
+XDeltaTrim <- set_zero(resTrim$dataComplete,
+                   subsetVars = listCovariates)
+
+XDeltaTrim <- model.matrix(modelTrim, data = XDeltaTrim)
+
+XDeltaTrim[, "(Intercept)"] <- 0.0
+
+XMoyDeltaTrim <- 
+  XDeltaTrim %>% 
+  apply(MARGIN = 2L, mean)
+
+varDeltaMoyTrim <- t(XMoyDeltaTrim) %*% 
+  resTrim$varCoefs %*% 
+  XMoyDeltaTrim + 
+  t(coef(modelTrim)) %*% 
+  var(XDeltaTrim) %*% 
+  coef(modelTrim) / nrow(XDeltaTrim)
+
+varDeltaMoyTrim <- varDeltaMoyTrim %>% as.numeric()
+
+varDeltaMoyTrim
 ```
 
 # Matching
