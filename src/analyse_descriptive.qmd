@@ -17,20 +17,31 @@ summary(dataObs)
 ## Variables explicatives
 
 ```{r}
-summVarsExp <- dataObs %>% 
-  mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
+
+dataExp <- summVarsExp <- dataObs %>% 
+  mutate_if(is.factor, function(v) as.integer(v) - 1L)
+
+summVarsExp <- dataExp %>% 
   group_by(group) %>% 
   select(-RE78) %>% 
   summarise(n = n(), across(everything(), mean)) %>% 
-  select(-group) %>% 
-  t()
+  select(-group)
 
-colnames(summVarsExp) <- c("Control", "Treated")
+summVarsExp <- dataExp %>% 
+  select(-RE78, -group) %>% 
+  summarise(n = n(), across(everything(), mean)) %>% 
+  rbind(summVarsExp, .) %>% t()
+
+remove(dataExp)
+
+colnames(summVarsExp) <- c("Control", "Treated", "E")
 
 summVarsExp <- round(summVarsExp, 4L)
 summVarsExp
 
-conversion_latex(summVarsExp, nom = "data_vars_exp")
+conversion_latex(summVarsExp, 
+                 nom = "data_vars_exp", 
+                 caption = "Moyenne des variables explicatives")
 ```
 ```{r}
 dataObs %>% 
@@ -41,6 +52,7 @@ dataObs %>%
    scale_y_continuous(labels = scales::percent_format()) +
   ylab("Proportion")
 ```
+
 ```{r}
 dataObs %>%
   dplyr::count(education, group)  %>%

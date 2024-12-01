@@ -97,11 +97,12 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   Ycontrol <- ifelse(group == "Control", Yobs, NA_real_)
   Ytreated <- ifelse(group == "Treated", Yobs, NA_real_)
   
+  YtreatedEstim <- predict(model, data = dataEstim)
+  
   dataEstim <- set_zero(dataEstim, 
-                        subsetUnits = (group == "Treated"),
                         subsetVars = colnames(XPrime))
   
-  YmisEstim <- predict(model, data = dataEstim)
+  YcontrolEstim <- predict(model, data = dataEstim)
   
   # dataEstim <- dataEstim %>% 
   #   mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
@@ -120,8 +121,8 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
        dataEval = dataEval,
        Ycontrol = Ycontrol, 
        Ytreated = Ytreated, 
-       YcontrolEstim = YmisEstim[group == "Control"], 
-       YtreatedEstim = YmisEstim[group == "Treated"])
+       YcontrolEstim = YcontrolEstim, 
+       YtreatedEstim = YtreatedEstim)
 }
 ```
 
@@ -130,6 +131,7 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
 ```{r}
 resLin <- regFun(dataObs$RE78, dataObs$group, dataObs[, listCovariates])
 modelLin <- resLin$model
+dataEval <- resLin$dataEval
 ```
 
 ```{r}
@@ -137,23 +139,39 @@ summary(modelLin)
 ```
 
 ```{r}
-modelLinAIC <- step(modelLin)
+group <- dataObs$group
+(resLin$Ycontrol - resLin$YcontrolEstim) %>% mean(na.rm = TRUE)
+(resLin$Ytreated - resLin$YtreatedEstim) %>% mean(na.rm = TRUE)
+```
+
+```{r}
+modelAIC <- step(modelLin, trace = 0L)
+```
+
+```{r}
+summary(modelAIC)
+```
+
+```{r}
+
 ```
 
 
 
 ```{r}
-group <- dataObs$group
-(modelLin$Ycontrol - modelLin$YcontrolEstim) %>% mean(na.rm = TRUE)
-(modelLin$Ytreated - modelLin$YtreatedEstim) %>% mean(na.rm = TRUE)
+rm(dataEval)
 ```
+
+
 # Régression sous support commun
+
+Rubin & Imbens (2015), p. 366
 
 ```{r}
 source("src/calcul_propension.R")
 ```
 
-Rubin & Imbens (2015), p. 366
+Calcul des variances conditionnelles pour la variable $T_k$.
 
 ```{r}
 varianceProp <- propValues * (1.0 - propValues)
@@ -163,6 +181,8 @@ meanInvVar <- mean(invVar)
 
 maxInvVar <= 2.0 * meanInvVar
 ```
+
+On cherche le premier gamma qui permet que le terme de gauche dépasse le terme de droite.
 
 ```{r}
 ordInvVar <- sort(invVar)
@@ -228,7 +248,7 @@ summary(modelTrim)
 
 ```{r}
 dataEval <- resTrim$dataEval
-modelTrimAIC <- step(modelTrim)
+modelTrimAIC <- step(modelTrim, trace = 0L)
 rm(dataEval)
 ```
 
