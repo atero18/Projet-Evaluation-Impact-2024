@@ -1,6 +1,7 @@
 ```{r}
 library(dplyr)
 library(ggplot2)
+library(stringr)
 ```
 
 ```{r}
@@ -12,7 +13,9 @@ Xprime représente les covariables utilisées pour l'effet causal pour toute la 
 Hypothèse d'homoscédasticité ($\sigma_1=\sigma_2=\sigma$) et de covariance diagonale entre les contrefactuels traités et contrôles.
 
 ```{r}
-set_zero <- function(data, subsetUnits = !logical(nrow(data)), subsetVars = colnames(data))
+set_zero <- function(data, 
+                     subsetUnits = !logical(nrow(data)), 
+                     subsetVars = colnames(data))
 {
   quantVars <- colnames(data)[vapply(data, is.numeric, logical(1L))]
   quantVars <- intersect(quantVars, subsetVars)
@@ -40,7 +43,7 @@ mean_factor <- function(factor)
 
 
 ```{r}
-regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
+regFun <- function(Yobs, group, X, XPrime = X, subset = NULL, step = FALSE)
 {
   if (!is.null(subset))
   {
@@ -53,6 +56,9 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
     
   
   N <- length(Yobs)
+  
+  nTreated <- (group == "Treated") %>% sum()
+  nControl <- (group == "Control") %>% sum()
   
   p <- ncol(X)
   # pPrime <- ncol(XPrime)
@@ -108,19 +114,27 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
                              collapse = " + ")) %>% 
     as.formula()
   
-  M <- model.matrix(formulaProp, data = dataEval)
-  invDesignMat <- solve(t(M) %*% M)
-  # termsWithDelta <- str_detect(colnames(M), "_delta")
-  # invDesignMatDelta <- invDesignMatDelta[termsWithDelta, termsWithDelta]
+  
   
   dataEval$Yobs <- Yobs
   
+  weights <- rep(nControl^-1L, N)
+  weights[group == "Treated"] <- nTreated^-1L
   
   model <- lm(formulaProp,
               data = dataEval, 
-              singular.ok = FALSE)
+              singular.ok = FALSE,
+              weights = weights)
   
-  estimVarYobs <- sum((model$residuals)^2L) / (N - ncol(M))
+  if (step)
+    model <- step(model, k = 2L, trace = 0L)
+  
+  estimVarYobs <- sum((model$residuals)^2L) / (N - length(coef(model)))
+  
+  M <- model.matrix(formula(model), data = dataEval)
+  invDesignMat <- solve(t(M) %*% M)
+  # termsWithDelta <- str_detect(colnames(M), "_delta")
+  # invDesignMatDelta <- invDesignMatDelta[termsWithDelta, termsWithDelta]
   
   Ycontrol <- ifelse(group == "Control", Yobs, NA_real_)
   Ytreated <- ifelse(group == "Treated", Yobs, NA_real_)
@@ -225,6 +239,8 @@ ucmterms <-
 
 # Régression linéaire multiple classique
 
+## Modèle global
+
 ```{r}
 resLin <- regFun(dataObs$RE78, dataObs$group, dataObs[, listCovariates])
 modelLin <- resLin$model
@@ -241,29 +257,12 @@ group <- dataObs$group
 (resLin$Ytreated - resLin$YtreatedEstim) %>% mean(na.rm = TRUE)
 ```
 
-```{r}
-modelAIC <- step(modelLin, trace = 0L)
-```
-
-```{r}
-summary(modelAIC)
-```
-
-
-```{r}
-rm(dataEval)
-```
-
-```{r}
-mean(resLin$Ytreated - resLin$YcontrolEstim, na.rm = TRUE)
-mean(resLin$YtreatedEstim - resLin$Ycontrol, na.rm = TRUE)
-```
-
 Estimation ATE sans conditionnement, sans biais si les $z_k$ sont identiquement distribués
 
 ```{r}
 mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
 ```
+
 
 ```{r}
 XDelta <- set_zero(resLin$dataComplete, subsetVars = listCovariates) %>% 
@@ -277,7 +276,70 @@ XMoyDelta <-
 
 varDeltaMoy <- t(XMoyDelta) %*% 
   resLin$varCoefs %*% 
-  XMoyDelta + t(coef(modelLin)) %*% var(XDelta) %*% coef(modelLin) / nrow(XDelta) 
+  XMoyDelta + t(coef(modelLin)) %*% 
+  var(XDelta) %*% 
+  coef(modelLin) / nrow(XDelta) 
+
+varDeltaMoy <- varDeltaMoy %>% as.numeric()
+
+varDeltaMoy
+```
+
+```{r}
+rm(XMoyDelta)
+```
+
+## Optimisation par AIC
+
+
+```{r}
+resLinAIC  <- regFun(dataObs$RE78,
+                     dataObs$group, 
+                     dataObs[, listCovariates],
+                     step = TRUE)
+
+modelLinAIC <- resLinAIC$model
+dataEval <- resLinAIC$dataEval
+```
+
+```{r}
+summary(modelLinAIC)
+# summary(modelLinAIC)$coefficients[str_detect(names(coef(modelLinAIC)), "_delta"), ] %>%
+#   round(4L) %>% 
+#   conversion_latex(nom = "reg_lin_global_AIC",
+#                    caption = "Coefficients MCO de la régression linéaire sur E (optimisée par AIC)")
+```
+
+
+```{r}
+rm(dataEval)
+```
+
+```{r}
+mean(resLinAIC$Ytreated - resLinAIC$YtreatedEstim, na.rm = TRUE)
+mean(resLinAIC$YcontrolEstim - resLinAIC$Ycontrol, na.rm = TRUE)
+```
+Estimation de l'ATE :
+
+```{r}
+mean(resLinAIC$YtreatedEstim - resLinAIC$YcontrolEstim)
+```
+
+```{r}
+XDeltaAIC <- set_zero(resLinAIC$dataComplete, subsetVars = listCovariates) %>% 
+  model.matrix(modelLinAIC, data = .)
+
+XDeltaAIC[, "(Intercept)"] <- 0.0
+
+XMoyDeltaAIC <- 
+  XDeltaAIC %>% 
+  apply(MARGIN = 2L, mean)
+
+varDeltaMoy <- t(XMoyDeltaAIC) %*% 
+  resLinAIC$varCoefs %*% 
+  XMoyDeltaAIC + t(coef(modelLinAIC)) %*% 
+  var(XDeltaAIC) %*% 
+  coef(modelLinAIC) / nrow(XDeltaAIC) 
 
 varDeltaMoy <- varDeltaMoy %>% as.numeric()
 
@@ -361,7 +423,7 @@ dataProp %>%
 ```
 
 
-
+## Modèle global
 
 ```{r}
 resTrim <- regFun(dataObs$RE78, dataObs$group, 
@@ -373,30 +435,16 @@ modelTrim <- resTrim$model
 summary(modelTrim)
 ```
 
-```{r}
-dataEval <- resTrim$dataEval
-modelTrimAIC <- step(modelTrim, trace = 0L)
-rm(dataEval)
-```
-
-```{r}
-summary(modelTrimAIC)
-```
-
-
-```{r}
-mean(resTrim$Ytreated - resTrim$YcontrolEstim, na.rm = TRUE)
-mean(resTrim$YtreatedEstim - resTrim$Ycontrol, na.rm = TRUE)
-```
 
 Estimation ATE sans biais si $z_k$ identiquement distribués conditionnellement à la présence dans l'intervalle
 ```{r}
 mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
 ```
 
+
 ```{r}
 XDeltaTrim <- set_zero(resTrim$dataComplete,
-                   subsetVars = listCovariates)
+                       subsetVars = listCovariates)
 
 XDeltaTrim <- model.matrix(modelTrim, data = XDeltaTrim)
 
@@ -417,5 +465,61 @@ varDeltaMoyTrim <- varDeltaMoyTrim %>% as.numeric()
 
 varDeltaMoyTrim
 ```
+
+
+## Optimisation par AIC
+
+
+```{r}
+
+resTrimAIC <- regFun(dataObs$RE78, dataObs$group, 
+                     dataObs[, listCovariates], 
+                     subset = maskTrimming, step = TRUE)
+
+modelTrimAIC <- resTrimAIC$model
+dataEval <- resTrimAIC$dataEval
+```
+
+```{r}
+summary(modelTrimAIC)
+```
+
+
+```{r}
+mean(resTrimAIC$Ytreated - resTrimAIC$YcontrolEstim, na.rm = TRUE)
+mean(resTrimAIC$YtreatedEstim - resTrimAIC$Ycontrol, na.rm = TRUE)
+```
+
+Estimation ATE sans biais si $z_k$ identiquement distribués conditionnellement à la présence dans l'intervalle
+```{r}
+mean(resTrimAIC$YtreatedEstim - resTrimAIC$YcontrolEstim)
+```
+
+
+
+```{r}
+XDeltaTrimAIC <- set_zero(resTrimAIC$dataComplete,
+                   subsetVars = listCovariates)
+
+XDeltaTrimAIC <- model.matrix(modelTrimAIC, data = XDeltaTrimAIC)
+
+XDeltaTrimAIC[, "(Intercept)"] <- 0.0
+
+XMoyDeltaTrimAIC <- 
+  XDeltaTrimAIC %>% 
+  apply(MARGIN = 2L, mean)
+
+varDeltaMoyTrimAIC <- t(XMoyDeltaTrimAIC) %*% 
+  resTrimAIC$varCoefs %*% 
+  XMoyDeltaTrimAIC + 
+  t(coef(modelTrimAIC)) %*% 
+  var(XDeltaTrimAIC) %*% 
+  coef(modelTrimAIC) / nrow(XDeltaTrimAIC)
+
+varDeltaMoyTrimAIC <- varDeltaMoyTrimAIC %>% as.numeric()
+
+varDeltaMoyTrimAIC
+```
+
 
 # Matching

@@ -18,8 +18,10 @@ summary(dataObs)
 
 ```{r}
 
-dataExp <- summVarsExp <- dataObs %>% 
-  mutate_if(is.factor, function(v) as.integer(v) - 1L)
+dataExp <- dataObs %>% 
+  mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
+  mutate(indRE74_RE75 = indRE74 * indRE75)
+  
 
 summVarsExp <- dataExp %>% 
   group_by(group) %>% 
@@ -32,7 +34,7 @@ summVarsExp <- dataExp %>%
   summarise(n = n(), across(everything(), mean)) %>% 
   rbind(summVarsExp, .) %>% t()
 
-remove(dataExp)
+rm(dataExp)
 
 colnames(summVarsExp) <- c("Control", "Treated", "E")
 
@@ -43,6 +45,12 @@ summVarsExp
 #                  nom = "data_vars_exp", 
 #                  caption = "Moyenne des variables explicatives")
 ```
+
+```{r}
+sum()
+```
+
+
 ```{r}
 dataObs %>% 
   ggplot() +
