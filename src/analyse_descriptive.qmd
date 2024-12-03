@@ -159,6 +159,8 @@ dataProp <- dataObs %>%
 dataProp %>% filter(group == "Treated") %>% 
   ggplot() + 
   geom_density(aes(x = e)) +
+  xlab("Score de propension") +
+  ylab("Densité") +
   ggtitle("Score de propension (estimé) chez les traités")
 ```
 
@@ -166,6 +168,8 @@ dataProp %>% filter(group == "Treated") %>%
 dataProp %>% filter(group == "Control") %>% 
   ggplot() + 
   geom_histogram(aes(x = e)) +
+  xlab("Score de propension") +
+  ylab("Densité") +
   ggtitle("Score de propension (estimé) pour le groupe contrôle")
 ```
 
