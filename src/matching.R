@@ -5,6 +5,8 @@ library(MatchIt)
 str(dataObs)
 
 dataObs = cbind(dataObs, propValues)
+dataObs$indice = seq(from=1,to=nrow(dataObs), by=1)
+
 
 # Distribution des scores de propension pour les individus contrôlés
 ggplot(data = dataObs %>% filter(group=="Control"), aes(x=propValues, group=group, fill=group)) +
@@ -64,4 +66,9 @@ match.data <- match.data(matching_mahalanobis)
 # En utilisant la distance de mahalanobis
 pairwise.t.test(match.data$RE78,match.data$group,paired=TRUE, p.adjust.method ="bonferroni")
 ATT = mean(match.data[match.data$group=="Treated","RE78"])-mean(match.data[match.data$group=="Control","RE78"])
+
+
+
+
+
 
