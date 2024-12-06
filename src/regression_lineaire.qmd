@@ -1,18 +1,22 @@
 ```{r}
 library(dplyr)
 library(ggplot2)
+library(stringr)
+library(glue)
 ```
 
 ```{r}
 source("src/loading_data.R")
 ```
 
-Xprime représente les covariables utilisées pour l'effet causal pour toute la population, si les unités se trouvaient dans le groupe traitement.
+# Implémentations de fonctions
 
-Hypothèse d'homoscédasticité ($\sigma_1=\sigma_2=\sigma$) et de covariance diagonale entre les contrefactuels traités et contrôles.
+Met à zéro les valeurs d'un jeu de données ou d'une partie de celui-ci :
 
 ```{r}
-set_zero <- function(data, subsetUnits = !logical(nrow(data)), subsetVars = colnames(data))
+set_zero <- function(data, 
+                     subsetUnits = !logical(nrow(data)), 
+                     subsetVars = colnames(data))
 {
   quantVars <- colnames(data)[vapply(data, is.numeric, logical(1L))]
   quantVars <- intersect(quantVars, subsetVars)
@@ -25,10 +29,43 @@ set_zero <- function(data, subsetUnits = !logical(nrow(data)), subsetVars = coln
 }
 ```
 
+Transforme les `factors` en vecteurs numériques :
+
 ```{r}
-regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
+factor_to_numeric <- 
+  function(factor) as.numeric(levels(factor))[factor]
+```
+
+Calcule la moyenne d'un facteur composé de 0 et de 1 :
+```{r}
+mean_factor <- function(factor)
 {
+  sum(factor == "1") / N
+}
+```
+
+
+`regFun` permet de faire une régression linéaire multiple de type Moindres Carrés Pondérés (on met plus de poids au groupe le plus petit) sur les données observées avec possibilité de prendre un sous-échantillon et d'utiliser des variables différentes pour le vecteur général $\beta$ et le vecteur $\delta$ utilisé pour le calcul de l'impact causal. Xprime représente les covariables utilisées pour l'effet causal pour toute la population, si les unités se trouvaient dans le groupe traitement. La fonction peut optimiser le modèle par AIC (`step = TRUE`) si souhaité.
+
+Hypothèse d'homoscédasticité ($\sigma_1=\sigma_2=\sigma$) et de covariance diagonale entre les contrefactuels traités et contrôles.
+
+```{r}
+regFun <- function(Yobs, group, X, XPrime = X, subset = NULL, step = FALSE)
+{
+  if (!is.null(subset))
+  {
+    Yobs <- Yobs[subset]
+    group <- group[subset]
+    
+    XPrime <- XPrime[subset, , drop = FALSE]
+    X <- X[subset, , drop = FALSE]
+  }
+    
+  
   N <- length(Yobs)
+  
+  nTreated <- (group == "Treated") %>% sum()
+  nControl <- (group == "Control") %>% sum()
   
   p <- ncol(X)
   # pPrime <- ncol(XPrime)
@@ -42,13 +79,12 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   order2Terms <- c(order2Terms, 
                    paste(quantVars, "^2", sep = ""))
   
-  
   # On renomme les variables qui sont utilisées uniquement
   # pour le calcul de l'effet
   colnames(XPrime) <- paste(colnames(XPrime), "_delta", sep = "")
   
   # Regroupement de toutes les covariables
-  dataEstim <- dataEval <- cbind(X, XPrime)
+  dataEstimTreated <- dataEval <- cbind(X, XPrime)
   
   # Passage à zéro des données supplémentaires pour
   # l'échantillon de contrôle pour l'évaluation
@@ -61,18 +97,16 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   order2TermsPrime <- c(order2TermsPrime, 
                         paste(quantVarsPrime, "^2", sep = ""))
   
-  
-  #qualVarsPrime <- setdiff(colnames(XPrime), quantVarsPrime)
-  
   dataEval <- set_zero(dataEval,
                        subsetUnits = (group == "Control"), 
                        subsetVars = colnames(XPrime))
   
-
   M <- model.matrix(as.formula(paste(" ~ . + ", 
                        paste(c(order2Terms, order2TermsPrime),
                              collapse = " + "))), data = dataEval)
   
+  # On vérifie si la matrice associée au modèle est de plein rang,
+  # sinon on ne garde que certaines variables
   QR <- qr(crossprod(M))
   vars <- QR$pivot[seq_len(QR$rank)]
   keptVars <- rownames(QR$qr)[vars]
@@ -80,89 +114,255 @@ regFun <- function(Yobs, group, X, XPrime = X, subset = NULL)
   order2Terms <- intersect(c(order2Terms, order2TermsPrime), keptVars)
   
   
-  formulaProp <- paste("Yobs ~ . + ", 
-                       paste(c(order2Terms, order2TermsPrime),
-                             collapse = " + ")) %>% 
+  formulaProp <- 
+    paste("Yobs ~ . + ", 
+          paste(c(order2Terms, order2TermsPrime), collapse = " + ")) %>% 
     as.formula()
+  
+  
   
   dataEval$Yobs <- Yobs
   
+  weights <- rep(nControl^-1L, N)
+  weights[group == "Treated"] <- nTreated^-1L
+  # W <- diag(weights)
   
   model <- lm(formulaProp,
               data = dataEval, 
               singular.ok = FALSE,
-              subset = subset)
+              weights = weights)
   
+  # Cas où on applique de l'optimisation par AIC
+  if (step)
+    model <- step(model, k = 2L, trace = 0L)
+  
+  estimVarYobs <- sum((model$residuals)^2L) / (N - length(coef(model)))
+  
+  
+  M <- model.matrix(formula(model), data = dataEval)
+  weightedM <- sweep(t(M), 2L, STATS = weights, FUN = "*")
+  
+  WeightsMat <- solve(weightedM %*% M) %*% weightedM
   
   Ycontrol <- ifelse(group == "Control", Yobs, NA_real_)
   Ytreated <- ifelse(group == "Treated", Yobs, NA_real_)
   
-  dataEstim <- set_zero(dataEstim, 
-                        subsetUnits = (group == "Treated"),
-                        subsetVars = colnames(XPrime))
+  # Pour l'estimation des traités le jeu de donnée
+  # utilisé correspond aux données X, XPrime complètes
+  YtreatedEstim <- predict.lm(model, 
+                              newdata = dataEstimTreated, 
+                              type = "response")
   
-  YmisEstim <- predict(model, data = dataEstim)
+  # Pour l'estimation du contrôle on nullifie les variables de XPrime,
+  # c-à-d celles associées au coefficient delta
+  dataEstimControl <- set_zero(dataEstimTreated, 
+                               subsetVars = colnames(XPrime))
   
-  # dataEstim <- dataEstim %>% 
-  #   mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
-  #   mutate(intercept = 1.0, .before = 1L) %>% 
-  #   as.matrix()
-  
-  # coefs <- coef(model)
-  
-  # On nullifie / ne considère pas les coefficients associés 
-  # à l'impact causal (ceux associés à XPrime) pour le groupe contrôle
-  
-  # YcontrolEstim <- dataEstim[, seq_len(p + 1L)] %*% coefs[seq_len(p + 1L)]
-  # YtreatedEstim <- dataEstim %*% coefs
+  YcontrolEstim <- predict.lm(model,
+                              newdata = dataEstimControl,
+                              type = "response")
   
   list(model = model,
+       group = group,
+       estimVarYobs = estimVarYobs,
+       varCoefs = WeightsMat %*% t(WeightsMat) * estimVarYobs,
        dataEval = dataEval,
+       dataComplete = dataEstimTreated,
        Ycontrol = Ycontrol, 
        Ytreated = Ytreated, 
-       YcontrolEstim = YmisEstim[group == "Control"], 
-       YtreatedEstim = YmisEstim[group == "Treated"])
+       YcontrolEstim = YcontrolEstim, 
+       YtreatedEstim = YtreatedEstim)
 }
 ```
 
 # Régression linéaire multiple classique
 
+## Modèle global
+
 ```{r}
 resLin <- regFun(dataObs$RE78, dataObs$group, dataObs[, listCovariates])
 modelLin <- resLin$model
+dataEval <- resLin$dataEval
 ```
 
 ```{r}
 summary(modelLin)
 ```
 
-```{r}
-modelLinAIC <- step(modelLin)
-```
-
-
 
 ```{r}
 group <- dataObs$group
-(modelLin$Ycontrol - modelLin$YcontrolEstim) %>% mean(na.rm = TRUE)
-(modelLin$Ytreated - modelLin$YtreatedEstim) %>% mean(na.rm = TRUE)
+(resLin$Ycontrol - resLin$YcontrolEstim) %>% mean(na.rm = TRUE)
+(resLin$Ytreated - resLin$YtreatedEstim) %>% mean(na.rm = TRUE)
 ```
+
+Les estimations moyennes sont sensiblement les mêmes sur les deux échantillons :
+```{r}
+mean(resLin$Ytreated - resLin$YcontrolEstim, na.rm = TRUE)
+mean(resLin$YtreatedEstim - resLin$Ycontrol, na.rm = TRUE)
+```
+
+Estimation ATE sans conditionnement, sans biais si les $z_k$ sont identiquement distribués
+
+```{r}
+mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
+```
+
+
+```{r}
+XDelta <- set_zero(resLin$dataComplete, subsetVars = listCovariates) %>% 
+  model.matrix(modelLin, data = .)
+
+XDelta[, "(Intercept)"] <- 0.0
+
+XMoyDelta <- 
+  XDelta %>% 
+  apply(MARGIN = 2L, mean)
+
+varDeltaMoy <- t(XMoyDelta) %*% 
+  resLin$varCoefs %*% 
+  XMoyDelta + 
+  t(coef(modelLin)) %*% 
+  var(XDelta) %*% 
+  coef(modelLin) / nrow(XDelta) 
+
+varDeltaMoy <- varDeltaMoy %>% as.numeric()
+
+varDeltaMoy
+```
+
+```{r}
+rm(XMoyDelta)
+```
+
+## Optimisation par AIC
+
+
+```{r}
+resLinAIC  <- regFun(dataObs$RE78,
+                     dataObs$group, 
+                     dataObs[, listCovariates],
+                     step = TRUE)
+
+modelLinAIC <- resLinAIC$model
+dataEval <- resLinAIC$dataEval
+```
+
+```{r}
+summary(modelLinAIC)
+# summary(modelLinAIC)$coefficients[str_detect(names(coef(modelLinAIC)), "_delta"), ] %>%
+#   round(4L) %>% 
+#   conversion_latex(nom = "reg_lin_global_AIC",
+#                    caption = "Coefficients MCO de la régression linéaire sur E (optimisée par AIC)")
+```
+
+
+```{r}
+rm(dataEval)
+```
+
+Différence au niveau des coefficients :
+```{r}
+coefsLin <- coef(modelLin)
+coefsLinAIC <- coef(modelLinAIC)
+
+differencesCoefs <- data.frame(var = names(coefsLin), 
+                               lin = coefsLin, 
+                               linAIC = 0.0)
+
+differencesCoefs[names(coefsLinAIC), "linAIC"] <- coefsLinAIC
+differencesCoefs %>% 
+  slice(-1L) %>%
+  mutate(coeffType = ifelse(str_detect(var, "_delta"), "delta", "beta"), 
+         .after = "var") %>% 
+  mutate(coeffConsAIC = linAIC != 0.0) %>% 
+  mutate(difference = lin - linAIC) %>% 
+  group_by(coeffType, coeffConsAIC) %>% 
+  arrange(-abs(difference), .by_group = TRUE) %>% 
+  ungroup() %>% 
+  select(-coeffConsAIC) %>% 
+  print(n = Inf)
+```
+
+Qualité de prédiction sur les observés :
+
+```{r}
+mean(resLinAIC$Ytreated - resLinAIC$YtreatedEstim, na.rm = TRUE)
+mean(resLinAIC$Ycontrol - resLinAIC$YcontrolEstim, na.rm = TRUE)
+```
+
+Les prédictions d'impact sont très différentes en fonction du groupe avec lequel on travaille :
+```{r}
+mean(resLinAIC$Ytreated - resLinAIC$YcontrolEstim, na.rm = TRUE)
+mean(resLinAIC$YtreatedEstim - resLinAIC$Ycontrol, na.rm = TRUE)
+```
+
+Estimation de l'ATE :
+
+```{r}
+mean(resLinAIC$YtreatedEstim - resLinAIC$YcontrolEstim)
+```
+
+La prédiction ponctuelle est très mauvaise. On garde le modèle global.
+
+```{r}
+XDeltaAIC <- set_zero(resLinAIC$dataComplete, subsetVars = listCovariates) %>% 
+  model.matrix(modelLinAIC, data = .)
+
+XDeltaAIC[, "(Intercept)"] <- 0.0
+
+XMoyDeltaAIC <- 
+  XDeltaAIC %>% 
+  apply(MARGIN = 2L, mean)
+
+varDeltaMoyAIC <- t(XMoyDeltaAIC) %*% 
+  resLinAIC$varCoefs %*% 
+  XMoyDeltaAIC + t(coef(modelLinAIC)) %*% 
+  var(XDeltaAIC) %*% 
+  coef(modelLinAIC) / nrow(XDeltaAIC) 
+
+varDeltaMoyAIC <- varDeltaMoyAIC %>% as.numeric()
+
+varDeltaMoyAIC
+```
+
+```{r}
+rm(coefsLin, coefsLinAIC, differencesCoefs)
+rm(XDeltaAIC, XMoyDeltaAIC, varDeltaMoyAIC)
+```
+
+
+
 # Régression sous support commun
+
+La régression sur support commun se base sur le score de propension. On charge les calculs réalisés pour l'analyse descriptive :
+
+
 
 ```{r}
 source("src/calcul_propension.R")
 ```
 
-Rubin & Imbens (2015), p. 366
+
+On va chercher un intervalle de la forme $I_\alpha := [\alpha, 1-\alpha]$ qui va contenir les scores de propensions estimés que l'on accepte de conserver. Une méthode est proposée dans Rubin & Imbens (2015), p. 366.
+
+Calcul des inverses des variances conditionnelles pour la variable $T_k$.
 
 ```{r}
-varianceProp <- propValues * (1.0 - propValues)
-invVar <- 1.0 / varianceProp
-maxInvVar <- max(invVar)
-meanInvVar <- mean(invVar)
-
-maxInvVar <= 2.0 * meanInvVar
+ordInvVar <- sort((propValues * (1.0 - propValues))^-1L)
 ```
+
+On regarde s'il faut laisser l'ensemble tel quel on cherche un $\alpha$ :
+
+```{r}
+maxInvVar <- last(ordInvVar)
+meanInvVar <- mean(ordInvVar)
+
+glue("Conserver l'ensemble tel quel : {maxInvVar <= 2.0 * meanInvVar}")
+```
+
+
+On cherche le premier gamma qui permet que le terme de gauche dépasse le terme de droite.
 
 ```{r}
 ordInvVar <- sort(invVar)
@@ -170,26 +370,30 @@ for (k in seq_along(ordInvVar))
 {
   if (k * ordInvVar[k] >= 2.0 * sum(ordInvVar[seq_len(k)]))
   {
-    gamma <- ordInvVar[k]
+    gamma <- unname(ordInvVar[k])
     break
   }
 }
 ```
 
 ```{r}
-k * unname(ordInvVar[k])
+k * unname(gamma)
 2.0 * sum(ordInvVar[seq_len(k)])
+rm(ordInvVar, k)
 ```
-
+La différence entre les deux termes est très faible, on peut rester sur cette valeur. On calcule l'estimateur $\hat{\alpha}$ associé :
 
 ```{r}
 alpha <- 0.5 - sqrt(0.25 - 1.0 / gamma)
+alpha
 ```
 
+On en déduit un masque logique permettant de conserver uniquement les individus avec un score de propension dans l'intervalle.
 ```{r}
 maskTrimming <- alpha <= propValues & propValues <= 1.0 - alpha
 ```
 
+Nombre d'individus conservés avec cette méthode, puis en particulier nombre d'individus traités conservés :
 ```{r}
 sum(maskTrimming)
 sum(maskTrimming[group == "Treated"])
@@ -202,6 +406,7 @@ Problème de rang (en particulier très peu de `Hispanic`) : on laisse tous les 
 maskTrimming[group == "Treated"] <- TRUE
 ```
 
+Affichage des courbes de score de propension sur avec restriction à $I_\alpha$ :
 ```{r}
 dataProp <- dataObs %>% 
   select(group) %>% 
@@ -210,15 +415,20 @@ dataProp <- dataObs %>%
 dataProp %>% 
   filter(maskTrimming) %>% 
   ggplot() + 
-  geom_histogram(aes(x = e, colour = group))
+  geom_density(aes(x = e, colour = group)) +
+  ggtitle("Score de propension (estimé) en fonction du groupe") +
+  xlab("Score de propension") +
+  ylab("Densité")
 ```
+Les scores sont moins proche de zéro, et les distribution sont un peu plus similaires que sans restriction. En tout cas les deux distributions ont clairement un support commun.
 
-
-
+## Modèle global
 
 ```{r}
 resTrim <- regFun(dataObs$RE78, dataObs$group, 
-                    dataObs[, listCovariates], subset = maskTrimming)
+                    dataObs[, listCovariates],
+                  subset = maskTrimming)
+
 modelTrim <- resTrim$model
 ```
 
@@ -226,14 +436,108 @@ modelTrim <- resTrim$model
 summary(modelTrim)
 ```
 
+Les estimations sur les deux groupes sont similaires en moyenne :
 ```{r}
-dataEval <- resTrim$dataEval
-modelTrimAIC <- step(modelTrim)
-rm(dataEval)
+mean(resTrim$Ytreated - resTrim$YcontrolEstim, na.rm = TRUE)
+mean(resTrim$YtreatedEstim - resTrim$Ycontrol, na.rm = TRUE)
+```
+
+Estimation ATE sur l'intervalle $I_\alpha$ sans biais si $z_k$ identiquement distribués conditionnellement à la présence dans l'intervalle
+```{r}
+mean(resTrim$YtreatedEstim - resTrim$YcontrolEstim)
+```
+
+
+```{r}
+XDeltaTrim <- set_zero(resTrim$dataComplete,
+                       subsetVars = listCovariates)
+
+XDeltaTrim <- model.matrix(modelTrim, data = XDeltaTrim)
+
+XDeltaTrim[, "(Intercept)"] <- 0.0
+
+XMoyDeltaTrim <- 
+  XDeltaTrim %>% 
+  apply(MARGIN = 2L, mean)
+
+varDeltaMoyTrim <- t(XMoyDeltaTrim) %*% 
+  resTrim$varCoefs %*% 
+  XMoyDeltaTrim + 
+  t(coef(modelTrim)) %*% 
+  var(XDeltaTrim) %*% 
+  coef(modelTrim) / nrow(XDeltaTrim)
+
+varDeltaMoyTrim <- varDeltaMoyTrim %>% as.numeric()
+
+varDeltaMoyTrim
+```
+
+
+## Optimisation par AIC
+
+
+```{r}
+resTrimAIC <- regFun(dataObs$RE78, dataObs$group, 
+                     dataObs[, listCovariates], 
+                     subset = maskTrimming, 
+                     step = TRUE)
+
+modelTrimAIC <- resTrimAIC$model
+dataEval <- resTrimAIC$dataEval
 ```
 
 ```{r}
 summary(modelTrimAIC)
 ```
+
+Validité des prédictions sur données observées :
+```{r}
+mean(resTrimAIC$Ytreated - resTrimAIC$YtreatedEstim, na.rm = TRUE)
+mean(resTrimAIC$Ycontrol - resTrimAIC$YcontrolEstim, na.rm = TRUE)
+```
+
+Comparaison des impacts estimés en utilisant une donnée observée pour chaque estimation :
+```{r}
+mean(resTrimAIC$Ytreated - resTrimAIC$YcontrolEstim, na.rm = TRUE)
+mean(resTrimAIC$YtreatedEstim - resTrimAIC$Ycontrol, na.rm = TRUE)
+```
+Les résultats sont proches.
+
+Estimation ATE sans biais si $z_k$ identiquement distribués conditionnellement à la présence dans l'intervalle
+```{r}
+mean(resTrimAIC$YtreatedEstim - resTrimAIC$YcontrolEstim)
+```
+
+
+
+```{r}
+XDeltaTrimAIC <- set_zero(resTrimAIC$dataComplete,
+                   subsetVars = listCovariates)
+
+XDeltaTrimAIC <- model.matrix(modelTrimAIC, data = XDeltaTrimAIC)
+
+XDeltaTrimAIC[, "(Intercept)"] <- 0.0
+
+XMoyDeltaTrimAIC <- 
+  XDeltaTrimAIC %>% 
+  apply(MARGIN = 2L, mean)
+
+varDeltaMoyTrimAIC <- t(XMoyDeltaTrimAIC) %*% 
+  resTrimAIC$varCoefs %*% 
+  XMoyDeltaTrimAIC + 
+  t(coef(modelTrimAIC)) %*% 
+  var(XDeltaTrimAIC) %*% 
+  coef(modelTrimAIC) / nrow(XDeltaTrimAIC)
+
+varDeltaMoyTrimAIC <- varDeltaMoyTrimAIC %>% as.numeric()
+
+varDeltaMoyTrimAIC
+```
+
+```{r}
+rm(alpha)
+```
+
+
 
 # Matching

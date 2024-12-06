@@ -17,21 +17,40 @@ summary(dataObs)
 ## Variables explicatives
 
 ```{r}
-summVarsExp <- dataObs %>% 
+
+dataExp <- dataObs %>% 
   mutate_if(is.factor, function(v) as.integer(v) - 1L) %>% 
+  mutate(indRE74_RE75 = indRE74 * indRE75)
+  
+
+summVarsExp <- dataExp %>% 
   group_by(group) %>% 
   select(-RE78) %>% 
   summarise(n = n(), across(everything(), mean)) %>% 
-  select(-group) %>% 
-  t()
+  select(-group)
 
-colnames(summVarsExp) <- c("Control", "Treated")
+summVarsExp <- dataExp %>% 
+  select(-RE78, -group) %>% 
+  summarise(n = n(), across(everything(), mean)) %>% 
+  rbind(summVarsExp, .) %>% t()
+
+rm(dataExp)
+
+colnames(summVarsExp) <- c("Control", "Treated", "E")
 
 summVarsExp <- round(summVarsExp, 4L)
 summVarsExp
 
-conversion_latex(summVarsExp, nom = "data_vars_exp")
+# conversion_latex(summVarsExp, 
+#                  nom = "data_vars_exp", 
+#                  caption = "Moyenne des variables explicatives")
 ```
+
+```{r}
+sum()
+```
+
+
 ```{r}
 dataObs %>% 
   ggplot() +
@@ -41,6 +60,7 @@ dataObs %>%
    scale_y_continuous(labels = scales::percent_format()) +
   ylab("Proportion")
 ```
+
 ```{r}
 dataObs %>%
   dplyr::count(education, group)  %>%
@@ -139,6 +159,8 @@ dataProp <- dataObs %>%
 dataProp %>% filter(group == "Treated") %>% 
   ggplot() + 
   geom_density(aes(x = e)) +
+  xlab("Score de propension") +
+  ylab("Densité") +
   ggtitle("Score de propension (estimé) chez les traités")
 ```
 
@@ -146,6 +168,8 @@ dataProp %>% filter(group == "Treated") %>%
 dataProp %>% filter(group == "Control") %>% 
   ggplot() + 
   geom_histogram(aes(x = e)) +
+  xlab("Score de propension") +
+  ylab("Densité") +
   ggtitle("Score de propension (estimé) pour le groupe contrôle")
 ```
 
