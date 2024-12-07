@@ -199,7 +199,8 @@ mean(resLin$YtreatedEstim - resLin$Ycontrol, na.rm = TRUE)
 Estimation ATE sans conditionnement, sans biais si les $z_k$ sont identiquement distribués
 
 ```{r}
-mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
+estimATE <- mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
+estimATE
 ```
 
 
@@ -223,6 +224,15 @@ varDeltaMoy <- t(XMoyDelta) %*%
 varDeltaMoy <- varDeltaMoy %>% as.numeric()
 
 varDeltaMoy
+```
+Intervalle de confiance :
+
+```{r}
+s <- 0.05
+estimATE + 
+  sqrt(varDeltaMoy) * 
+  qnorm(1.0 - s / 2.0, 0.0, 1.0) *
+  c(-1L, +1L)
 ```
 
 ```{r}
@@ -533,7 +543,8 @@ Les résultats sont proches.
 
 Estimation ATE sans biais si $z_k$ identiquement distribués conditionnellement à la présence dans l'intervalle
 ```{r}
-mean(resTrimAIC$YtreatedEstim - resTrimAIC$YcontrolEstim)
+estimATE <- mean(resTrimAIC$YtreatedEstim - resTrimAIC$YcontrolEstim)
+estimATE
 ```
 
 
@@ -561,20 +572,20 @@ varDeltaMoyTrimAIC <- varDeltaMoyTrimAIC %>% as.numeric()
 
 varDeltaMoyTrimAIC
 ```
+Intervalle de confiance :
+
+```{r}
+s <- 0.05
+estimATE + 
+  sqrt(varDeltaMoyTrimAIC) * 
+  qnorm(1.0 - s / 2.0, 0.0, 1.0) *
+  c(-1L, +1L)
+```
 
 ```{r}
 rm(alpha)
 ```
 
 
-```{r}
-df = data.frame(complete = c(0.0, 0.0, 0.0), AIC = c(0.0,0.0, 0.0))
-rownames(df) = c("DeltaT", "DeltaC", "ATE")
-
-
-df %>%
-  conversion_latex(nom = "reg_trim_test_predictions",
-                   caption = "Mesure de qualité d'estimation par ensemble sous espace tronqué")
-```
 
 # Matching
