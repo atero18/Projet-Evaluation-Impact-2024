@@ -190,12 +190,6 @@ summary(modelLin)
 ```
 
 
-```{r}
-group <- dataObs$group
-(resLin$Ycontrol - resLin$YcontrolEstim) %>% mean(na.rm = TRUE)
-(resLin$Ytreated - resLin$YtreatedEstim) %>% mean(na.rm = TRUE)
-```
-
 Les estimations moyennes sont sensiblement les mêmes sur les deux échantillons :
 ```{r}
 mean(resLin$Ytreated - resLin$YcontrolEstim, na.rm = TRUE)
@@ -205,7 +199,8 @@ mean(resLin$YtreatedEstim - resLin$Ycontrol, na.rm = TRUE)
 Estimation ATE sans conditionnement, sans biais si les $z_k$ sont identiquement distribués
 
 ```{r}
-mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
+estimATE <- mean(resLin$YtreatedEstim - resLin$YcontrolEstim)
+estimATE
 ```
 
 
@@ -230,6 +225,15 @@ varDeltaMoy <- varDeltaMoy %>% as.numeric()
 
 varDeltaMoy
 ```
+Intervalle de confiance :
+
+```{r}
+s <- 0.05
+estimATE + 
+  sqrt(varDeltaMoy) * 
+  qnorm(1.0 - s / 2.0, 0.0, 1.0) *
+  c(-1L, +1L)
+```
 
 ```{r}
 rm(XMoyDelta)
@@ -250,8 +254,8 @@ dataEval <- resLinAIC$dataEval
 
 ```{r}
 summary(modelLinAIC)
-# summary(modelLinAIC)$coefficients[str_detect(names(coef(modelLinAIC)), "_delta"), ] %>%
-#   round(4L) %>% 
+# summary(modelLinAIC)$coefficients[str_detect(names(coef(modelLinAIC)), "_delta"), -4L] %>%
+#   round(4L) %>%
 #   conversion_latex(nom = "reg_lin_global_AIC",
 #                    caption = "Coefficients MCO de la régression linéaire sur E (optimisée par AIC)")
 ```
@@ -266,30 +270,27 @@ Différence au niveau des coefficients :
 coefsLin <- coef(modelLin)
 coefsLinAIC <- coef(modelLinAIC)
 
-differencesCoefs <- data.frame(var = names(coefsLin), 
+differencesCoefsLin <- data.frame(var = names(coefsLin), 
                                lin = coefsLin, 
                                linAIC = 0.0)
 
-differencesCoefs[names(coefsLinAIC), "linAIC"] <- coefsLinAIC
-differencesCoefs %>% 
-  slice(-1L) %>%
+differencesCoefsLin[names(coefsLinAIC), "linAIC"] <- coefsLinAIC
+differencesCoefsLin <- 
+  differencesCoefsLin %>% 
+  # slice(-1L) %>%
   mutate(coeffType = ifelse(str_detect(var, "_delta"), "delta", "beta"), 
          .after = "var") %>% 
   mutate(coeffConsAIC = linAIC != 0.0) %>% 
-  mutate(difference = lin - linAIC) %>% 
+  mutate(difference = lin - linAIC) 
+
+differencesCoefsLin %>% 
   group_by(coeffType, coeffConsAIC) %>% 
-  arrange(-abs(difference), .by_group = TRUE) %>% 
-  ungroup() %>% 
-  select(-coeffConsAIC) %>% 
+  arrange(-abs(difference), .by_group = TRUE) %>%
+  ungroup() %>%
+  select(-coeffConsAIC) %>%
   print(n = Inf)
 ```
 
-Qualité de prédiction sur les observés :
-
-```{r}
-mean(resLinAIC$Ytreated - resLinAIC$YtreatedEstim, na.rm = TRUE)
-mean(resLinAIC$Ycontrol - resLinAIC$YcontrolEstim, na.rm = TRUE)
-```
 
 Les prédictions d'impact sont très différentes en fonction du groupe avec lequel on travaille :
 ```{r}
@@ -365,7 +366,6 @@ glue("Conserver l'ensemble tel quel : {maxInvVar <= 2.0 * meanInvVar}")
 On cherche le premier gamma qui permet que le terme de gauche dépasse le terme de droite.
 
 ```{r}
-ordInvVar <- sort(invVar)
 for (k in seq_along(ordInvVar))
 {
   if (k * ordInvVar[k] >= 2.0 * sum(ordInvVar[seq_len(k)]))
@@ -396,14 +396,14 @@ maskTrimming <- alpha <= propValues & propValues <= 1.0 - alpha
 Nombre d'individus conservés avec cette méthode, puis en particulier nombre d'individus traités conservés :
 ```{r}
 sum(maskTrimming)
-sum(maskTrimming[group == "Treated"])
+sum(maskTrimming[dataObs$group == "Treated"])
 ```
 
 Tous les traités ne sont pas conservés.
 
 Problème de rang (en particulier très peu de `Hispanic`) : on laisse tous les traités.
 ```{r}
-maskTrimming[group == "Treated"] <- TRUE
+maskTrimming[dataObs$group == "Treated"] <- TRUE
 ```
 
 Affichage des courbes de score de propension sur avec restriction à $I_\alpha$ :
@@ -435,6 +435,7 @@ modelTrim <- resTrim$model
 ```{r}
 summary(modelTrim)
 ```
+
 
 Les estimations sur les deux groupes sont similaires en moyenne :
 ```{r}
@@ -488,12 +489,49 @@ dataEval <- resTrimAIC$dataEval
 
 ```{r}
 summary(modelTrimAIC)
+
+# summary(modelTrimAIC)$coefficients[str_detect(names(coef(modelTrimAIC)), "_delta"), ] %>%
+#   round(4L) %>%
+#   conversion_latex(nom = "reg_lin_trim_AIC",
+#                    caption = "Coefficients MCO de la régression linéaire sur espace tronqué (optimisée par AIC)")
 ```
 
-Validité des prédictions sur données observées :
+
+Comparaison des coefficients avec les deux modèles tronqués :
 ```{r}
-mean(resTrimAIC$Ytreated - resTrimAIC$YtreatedEstim, na.rm = TRUE)
-mean(resTrimAIC$Ycontrol - resTrimAIC$YcontrolEstim, na.rm = TRUE)
+coefsTrim <- coef(modelTrim)
+coefsTrimAIC <- coef(modelTrimAIC)
+
+differencesCoefsTrim <- data.frame(var = names(coefsTrim), 
+                               trim = coefsTrim, 
+                               trimAIC = 0.0)
+
+differencesCoefsTrim[names(coefsTrimAIC), "trimAIC"] <- coefsTrimAIC
+differencesCoefsTrim <-
+  differencesCoefsTrim %>% 
+  mutate(coeffType = ifelse(str_detect(var, "_delta"), "delta", "beta"), 
+         .after = "var") %>% 
+  mutate(coeffConsAIC = trimAIC != 0.0) %>% 
+  mutate(difference = trim - trimAIC)
+
+
+differencesCoefsTrim %>% 
+  group_by(coeffType, coeffConsAIC) %>% 
+  arrange(-abs(difference), .by_group = TRUE) %>% 
+  ungroup() %>% 
+  select(-coeffConsAIC) %>% 
+  filter(coeffType == "delta", trimAIC != 0.0) %>% 
+  print(n = Inf)
+```
+Comparaison des coefficients entre les modèles AIC sur $E$ et ensemble tronqué :
+
+```{r}
+differencesCoefsLin %>% 
+  select(var, lin, linAIC) %>% 
+  inner_join(differencesCoefsTrim, by = join_by(var)) %>% 
+  filter(coeffType == "delta") %>% 
+  select(var, linAIC, trimAIC) %>% 
+  filter(linAIC != 0.0 | trimAIC != 0.0)
 ```
 
 Comparaison des impacts estimés en utilisant une donnée observée pour chaque estimation :
@@ -505,7 +543,8 @@ Les résultats sont proches.
 
 Estimation ATE sans biais si $z_k$ identiquement distribués conditionnellement à la présence dans l'intervalle
 ```{r}
-mean(resTrimAIC$YtreatedEstim - resTrimAIC$YcontrolEstim)
+estimATE <- mean(resTrimAIC$YtreatedEstim - resTrimAIC$YcontrolEstim)
+estimATE
 ```
 
 
@@ -532,6 +571,15 @@ varDeltaMoyTrimAIC <- t(XMoyDeltaTrimAIC) %*%
 varDeltaMoyTrimAIC <- varDeltaMoyTrimAIC %>% as.numeric()
 
 varDeltaMoyTrimAIC
+```
+Intervalle de confiance :
+
+```{r}
+s <- 0.05
+estimATE + 
+  sqrt(varDeltaMoyTrimAIC) * 
+  qnorm(1.0 - s / 2.0, 0.0, 1.0) *
+  c(-1L, +1L)
 ```
 
 ```{r}

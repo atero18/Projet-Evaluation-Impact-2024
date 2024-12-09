@@ -46,10 +46,6 @@ summVarsExp
 #                  caption = "Moyenne des variables explicatives")
 ```
 
-```{r}
-sum()
-```
-
 
 ```{r}
 dataObs %>% 
