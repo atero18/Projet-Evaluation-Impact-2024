@@ -21,7 +21,7 @@ modelProp <-
 
 # summary(modelProp)
 
-rm(order2Terms, formulaProp)
+rm(order2Terms)
 
 # modelPropAIC <- step(modelProp, trace = 0L)
 
